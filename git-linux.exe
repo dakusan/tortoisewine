@@ -1,2 +1,31 @@
 #!/bin/bash
-/usr/bin/git "$@"
+GIT_PATH=/usr/bin/git
+TMP_FILE=$(winepath -u 'c:\git.tmp')
+echo -n "" > "$TMP_FILE"
+
+if [[ "$1" == "version" || "$1" == "--version" ]]; then
+    output=$("$GIT_PATH" "$@")
+    exit_code=$?
+    printf '%s\n' "${output}.windows.1" > "$TMP_FILE"
+    echo -ne '\0!\0!\0!\0!\0!' >> "$TMP_FILE"
+    exit $exit_code
+fi
+
+new_args=()
+for arg in "$@"; do
+    if [[ $arg =~ ^[a-zA-Z]:\\ ]]; then
+        converted=$(winepath -u "$arg")
+        new_args+=("$converted")
+    else
+        new_args+=("$arg")
+    fi
+done
+
+if [[ ${new_args[0]} == "diff-index" ]]; then
+    "$GIT_PATH" update-index --refresh 2>&1 > /dev/null
+fi
+
+"$GIT_PATH" "${new_args[@]}" > "$TMP_FILE"
+exit_code=$?
+echo -ne '\0!\0!\0!\0!\0!' >> "$TMP_FILE"
+exit $exit_code
