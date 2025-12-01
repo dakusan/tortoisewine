@@ -32,8 +32,18 @@ if [[ ${new_args[0]} == "diff-index" ]]; then
     "$GIT_PATH" update-index --refresh 2>&1 > /dev/null
 fi
 
-#Save the git command output to file followed by the ending sequence
+#Save the git command output to file
 "$GIT_PATH" "${new_args[@]}" >> "$TMP_FILE"
 exit_code=$?
+
+#Logging
+if [[ -v TGIT_LOG ]]; then
+    TGIT_LOG_PATH=/tmp/tgit-wrapper.log
+    echo `date +"%Y-%m-%d %H:%M:%S:"` "${new_args[@]}" >> "$TGIT_LOG_PATH"
+    cat "$TMP_FILE" >> "$TGIT_LOG_PATH"
+    echo -e "\n------------------------------------------" >> "$TGIT_LOG_PATH"
+fi
+
+#Send finishing data to our executable
 END_SEQ
 exit $exit_code
