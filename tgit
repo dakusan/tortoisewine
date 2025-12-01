@@ -1,0 +1,3 @@
+#!/bin/bash
+export WINEPREFIX=~/.wine-tortoise
+wine "C:\Program Files\TortoiseGit\bin\TortoiseGitProc.exe" /command:$1 /path:`winepath -w "$2"` "${@:3}" &
