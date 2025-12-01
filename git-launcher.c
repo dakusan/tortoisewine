@@ -93,7 +93,6 @@ int main(int argc, const char *argv[])
 	free(Command.Str);
 
 	//Prepare to read in the outputs
-	MilliSleep(150); //Allow the file time to get truncated
 	OutPipe MainOut={0, stdout, FileTempPath, "Standard", 0, false, {0}};
 	OutPipe ErrOut={0, stderr, FileTempPathErr, "Error", 0, false, {0}};
 	OutPipe_Open(&MainOut);
@@ -196,7 +195,22 @@ void OutPipe_Close(OutPipe* Pipe, bool RemoveTempFile)
 //Open the file to pass through
 void OutPipe_Open(OutPipe* Pipe)
 {
-	if(Pipe->File=fopen(Pipe->FilePath, "rb")) //On success
+	//Keep attempting to open the file until it has data
+	FILE *TestOpen=NULL;
+	for(int Attempts=0; Attempts<100; Attempts++) {
+		MilliSleep(50);
+		if(!(TestOpen=fopen(Pipe->FilePath, "rb")))
+			continue;
+		fseek(TestOpen, 0, SEEK_END);
+		if(ftell(TestOpen)>0) {
+			fseek(TestOpen, 0, SEEK_SET);
+			break;
+		}
+		fclose(TestOpen);
+		TestOpen=NULL;
+	}
+
+	if(Pipe->File=TestOpen) //On success
 		_setmode(_fileno(Pipe->OutStream), _O_BINARY); //Set the output stream to binary (nulls are used)
 	else //On error
 		fprintf(stderr, "Could not open %s output file: %s\n", Pipe->PipeType, Pipe->FilePath);

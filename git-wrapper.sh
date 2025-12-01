@@ -6,8 +6,8 @@ TMP_FILE_ERR=$(winepath -u 'c:\git.tmp.err') #This must match FileTempPathErr in
 END_SEQ() { echo -ne '\0!\0!\0!\0!\0!'; } #This must match EndSeq in git-launcher.c (Cannot store in variable due to nulls)
 
 #Truncate the temp file if it already exists. Needs to happen immediately so executable doesn’t try to access the wrong file
-echo -n "" > "$TMP_FILE"
-echo -n "" > "$TMP_FILE_ERR"
+> "$TMP_FILE"
+> "$TMP_FILE_ERR"
 
 #Handle version request. Need to append .windows.1 to the end for TortoiseGit.
 if [[ "$1" == "version" || "$1" == "--version" ]]; then
