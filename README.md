@@ -52,11 +52,10 @@ You should be good to go now to run TortoiseGit commands via `tgit`.
 
 # Why this is needed
 The native Linux `git` executable has some issues with TortoiseGit.
-1. It needs to report as a Windows version of Git with `.windows.1` at the end of the version.
+1. It needs to report as a Windows version of Git with `.windows.1` at the end of the version. So there has to be pass through wrappers.
+1. The git.exe needs to be an actual executable. Attempting to just use bash scripts always fails.
 1. `git diff-index` required a `git update-index` first.
 1. There are issues with Wine not listening to the process long enough to get all the output and there are file syncing issues across file systens. For this reason, all Git output is routed through a temporary file with a custom EOF terminator.
 	> Originally, the only way I found to get the output for `git.exe diff-index --raw HEAD --numstat -C50% -M50% -z --` to TortoiseGit required 3 things in the compiled exeutable: A `git update-index`, a redirect to an output file, and a sub-second timeout after the command. There was *absolutely no other* way to get it to work. Trust me, I tried.
 
 I realized after a lot of painful C/C++ work that it was best to handle the logic in bash and just use the C executable to return the rerouted output and the return code. The original C++ version I was creating is still available on the first commit to this repository.
-
-

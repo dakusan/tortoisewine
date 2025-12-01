@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <time.h>
+#include <signal.h>
 #include <unistd.h> //usleep
 #include <fcntl.h> //_O_BINARY
 
@@ -67,8 +68,33 @@ bool OutPipe_Process(OutPipe* Pipe);
 void OutPipe_Close(OutPipe* Pipe, bool DoNotRemove);
 void OutPipe_Open(OutPipe* Pipe);
 
+//Handle signals
+volatile sig_atomic_t CaughtSig=0;
+void SignalHandler(int Sig) { signal(CaughtSig=Sig, SIG_DFL); } // Reset to default after handling
+int ReturnFromSigFunc()
+{
+	fprintf(
+		stderr, "Interrupted by signal %d(%s)\n", CaughtSig,
+		  CaughtSig==SIGINT ? "SIGINT"
+#ifdef SIGHUP
+		: CaughtSig==SIGHUP ? "SIGHUP"
+#endif
+		: CaughtSig==SIGTERM? "SIGTERM"
+		: "Unknown signal"
+	);
+	return 104;
+}
+#define ReturnFromSig() if(CaughtSig) return ReturnFromSigFunc()
+
 int main(int argc, const char *argv[])
 {
+	//Signal handling
+	signal(SIGINT , SignalHandler); //Ctrl+C
+	signal(SIGTERM, SignalHandler); //Kill (graceful)
+#ifdef SIGHUP
+	signal(SIGHUP , SignalHandler); //Terminal disconnect
+#endif
+
 	//Create and execute the command string
 	StrBuf Command={0};
 	CmdCh('"'); //Quote the entire string (windows is dumb)
@@ -89,18 +115,21 @@ int main(int argc, const char *argv[])
 	CmdStr(" 2>&1 > NUL"); //Ignore all output, as real output is written to a file
 	CmdCh('"'); //End the entire string quote
 	CmdCh(0); //Terminate the string
+	ReturnFromSig();
 	int RetCode=system(Command.Str);
 	free(Command.Str);
+	ReturnFromSig();
 
 	//Prepare to read in the outputs
 	OutPipe MainOut={0, stdout, FileTempPath, "Standard", 0, false, {0}};
 	OutPipe ErrOut={0, stderr, FileTempPathErr, "Error", 0, false, {0}};
 	OutPipe_Open(&MainOut);
 	OutPipe_Open(&ErrOut);
-	if(!MainOut.File || !ErrOut.File)
+	if(CaughtSig || !MainOut.File || !ErrOut.File)
 	{
 		OutPipe_Close(&MainOut, false);
 		OutPipe_Close(&ErrOut, false);
+		ReturnFromSig();
 		return !MainOut.File ? 101 : 102;
 	}
 
@@ -109,6 +138,10 @@ int main(int argc, const char *argv[])
 	while(1) {
 		//If both are done, then complete the process
 		if(MainOut.IsComplete && ErrOut.IsComplete)
+			break;
+
+		//Check for interruption via signal
+		if(CaughtSig)
 			break;
 
 		//Process both pipes. If either had data, update the LastUpdate time
@@ -130,8 +163,9 @@ int main(int argc, const char *argv[])
 	}
 
 	//Clean up and close out
-	OutPipe_Close(&MainOut, true);
-	OutPipe_Close(&ErrOut, true);
+	OutPipe_Close(&MainOut, !CaughtSig);
+	OutPipe_Close(&ErrOut, !CaughtSig);
+	ReturnFromSig();
 	return RetCode;
 }
 
@@ -199,6 +233,7 @@ void OutPipe_Open(OutPipe* Pipe)
 	FILE *TestOpen=NULL;
 	for(int Attempts=0; Attempts<100; Attempts++) {
 		MilliSleep(50);
+		if(CaughtSig) return;
 		if(!(TestOpen=fopen(Pipe->FilePath, "rb")))
 			continue;
 		fseek(TestOpen, 0, SEEK_END);
