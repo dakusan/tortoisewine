@@ -3,17 +3,19 @@
 #include <stdio.h>
 #include <malloc.h>
 #include <string.h>
+#include <stdbool.h>
 #include <time.h>
 #include <unistd.h> //usleep
 #include <fcntl.h> //_O_BINARY
 
 //Set this
-const char* GitPath="c:\\git-wrapper.exe"; //Do not try to escape this string
+const char *GitPath="c:\\git-wrapper.exe"; //Do not try to escape this string
 
 //No need to update these
-const char* FileTempPath="C:\\git.tmp";
-const int GrowSize=1024;
+const char *FileTempPath="C:\\git.tmp", *FileTempPathErr="C:\\git.tmp.err";
 const char EndSeq[]={0, '!', 0, '!', 0, '!', 0, '!', 0, '!'}; //This sequence marks the end of the output
+const int GrowSize=1024;
+enum { SeqSize=sizeof(EndSeq) }; //Using enum for compile time constant
 
 //Simple use functions
 void MilliSleep(int Milliseconds) { usleep(Milliseconds*1000); }
@@ -52,6 +54,19 @@ static void AddStr(StrBuf *B, const char *Str)
 #define CmdCh(Arg1) AddCh(&Command, Arg1)
 #define CmdStr(Arg1) AddStr(&Command, Arg1)
 
+//Handle reading a file to an output stream
+typedef struct
+{
+	FILE *File, *OutStream;
+	const char *FilePath, *PipeType;
+	size_t CheckSize;
+	bool IsComplete;
+	char Check[SeqSize];
+} OutPipe;
+bool OutPipe_Process(OutPipe* Pipe);
+void OutPipe_Close(OutPipe* Pipe, bool DoNotRemove);
+void OutPipe_Open(OutPipe* Pipe);
+
 int main(int argc, const char *argv[])
 {
 	//Create and execute the command string
@@ -77,59 +92,112 @@ int main(int argc, const char *argv[])
 	int RetCode=system(Command.Str);
 	free(Command.Str);
 
-	//Prepare to read in the file
-	MilliSleep(100); //Allow the file time to get truncated
-	FILE *File=fopen(FileTempPath, "rb");
-	if(!File)
-		return RetCode ?: 101;
-	_setmode(_fileno(stdout), _O_BINARY);
-	const size_t ChunkCapacity=4096, SeqSize=sizeof(EndSeq);
-	char Check[SeqSize], Chunk[ChunkCapacity];
-	size_t CheckSize=0, Bytes;
+	//Prepare to read in the outputs
+	MilliSleep(150); //Allow the file time to get truncated
+	OutPipe MainOut={0, stdout, FileTempPath, "Standard", 0, false, {0}};
+	OutPipe ErrOut={0, stderr, FileTempPathErr, "Error", 0, false, {0}};
+	OutPipe_Open(&MainOut);
+	OutPipe_Open(&ErrOut);
+	if(!MainOut.File || !ErrOut.File)
+	{
+		OutPipe_Close(&MainOut, false);
+		OutPipe_Close(&ErrOut, false);
+		return !MainOut.File ? 101 : 102;
+	}
+
+	//Process both stdout and stderr pipes
 	clock_t LastUpdate=clock();
-
-	//Read in and output up to ChunkCapacity bytes at a time. When the end of the read bytes equals the end sequence then exit (do not output the end sequence)
 	while(1) {
-		//Read in bytes
-		if(!(Bytes=fread(Chunk, 1, ChunkCapacity, File))) {
-			//Exit if more than 10 seconds has passed since the last update
-			if((clock()-LastUpdate)*1000L/CLOCKS_PER_SEC>10*1000) {
-				fwrite(Check, 1, CheckSize, stdout); //Output the remainder of the check buffer
-				RetCode=RetCode ?: 101;
-				break;
-			}
+		//If both are done, then complete the process
+		if(MainOut.IsComplete && ErrOut.IsComplete)
+			break;
 
-			//Sleep for 100 ms
-			MilliSleep(100);
+		//Process both pipes. If either had data, update the LastUpdate time
+		bool MainWrote=OutPipe_Process(&MainOut), ErrWrote=OutPipe_Process(&ErrOut);
+		if(MainWrote || ErrWrote) {
+			LastUpdate=clock();
 			continue;
 		}
-		LastUpdate=clock(); //Update the LastUpdate time
 
-		//Write the current chunk
-		int ChunkBytesToMoveToCheck=min(Bytes, SeqSize);
-		fwrite(Chunk, 1, Bytes-ChunkBytesToMoveToCheck, stdout);
-		fflush(stdout);
-
-		//Shift Check bytes out to make room for bytes from Chunk. As bytes are shifted out, write them to stdout
-		int ShiftCheckBytes=ChunkBytesToMoveToCheck-(SeqSize-CheckSize);
-		if(ShiftCheckBytes>0) {
-			fwrite(Check, 1, ShiftCheckBytes, stdout);
-			memmove(Check, Check+ShiftCheckBytes, CheckSize-=ShiftCheckBytes);
+		//Exit if more than 10 seconds has passed since the last update
+		if((clock()-LastUpdate)*1000L/CLOCKS_PER_SEC>10*1000) {
+			fprintf(stderr, "%s\n", "Process has timed out (10 seconds)");
+			RetCode=RetCode ?: 103;
+			break;
 		}
 
-		//Fill bytes from Chunk into Check
-		memcpy(Check+CheckSize, Chunk+Bytes-ChunkBytesToMoveToCheck, ChunkBytesToMoveToCheck);
-		CheckSize+=ChunkBytesToMoveToCheck;
-
-		//If the CheckSize is large enough and matches our EndSeq, then exit here
-		if(CheckSize==SeqSize && !memcmp(Check, EndSeq, SeqSize))
-			break;
+		//Sleep for 100 ms before trying to read the pipes again
+		MilliSleep(100);
 	}
 
 	//Clean up and close out
-	fflush(stdout);
-	fclose(File);
-	remove(FileTempPath);
-
+	OutPipe_Close(&MainOut, true);
+	OutPipe_Close(&ErrOut, true);
 	return RetCode;
+}
+
+//Read in and output up to ChunkCapacity bytes at a time from OutPipe (stdout and stderr). When the end of the read bytes equals the end sequence then we are done with the stream (do not output the end sequence)
+bool OutPipe_Process(OutPipe* Pipe)
+{
+	//If already complete, nothing to do
+	if(Pipe->IsComplete)
+		return false;
+
+	//Buffers
+	const size_t ChunkCapacity=4096;
+	char Chunk[ChunkCapacity];
+
+	//Read in bytes. Return false if nothing read.
+	int Bytes;
+	if(!(Bytes=fread(Chunk, 1, ChunkCapacity, Pipe->File)))
+		return false;
+
+	//Write the current chunk
+	int ChunkBytesToMoveToCheck=min(Bytes, SeqSize);
+	fwrite(Chunk, 1, Bytes-ChunkBytesToMoveToCheck, Pipe->OutStream);
+	fflush(Pipe->OutStream);
+
+	//Shift Check bytes out to make room for bytes from Chunk. As bytes are shifted out, write them to stdout
+	int ShiftCheckBytes=ChunkBytesToMoveToCheck-(SeqSize-Pipe->CheckSize);
+	if(ShiftCheckBytes>0) {
+		fwrite(Pipe->Check, 1, ShiftCheckBytes, Pipe->OutStream);
+		memmove(Pipe->Check, Pipe->Check+ShiftCheckBytes, Pipe->CheckSize-=ShiftCheckBytes);
+	}
+
+	//Fill bytes from Chunk into Check
+	memcpy(Pipe->Check+Pipe->CheckSize, Chunk+Bytes-ChunkBytesToMoveToCheck, ChunkBytesToMoveToCheck);
+	Pipe->CheckSize+=ChunkBytesToMoveToCheck;
+
+	//If the sequence doesn’t match, return that the pipe had data
+	if(Pipe->CheckSize!=SeqSize || memcmp(Pipe->Check, EndSeq, SeqSize))
+		return true;
+
+	//Finish out the pipe
+	Pipe->CheckSize=0;
+	OutPipe_Close(Pipe, true);
+	return true;
+}
+
+//Clean up and close out the pipe
+void OutPipe_Close(OutPipe* Pipe, bool RemoveTempFile)
+{
+	if(Pipe->IsComplete)
+		return;
+	if(Pipe->CheckSize) //Output the remainder of the check buffer
+		fwrite(Pipe->Check, 1, Pipe->CheckSize, Pipe->OutStream);
+	fflush(Pipe->OutStream);
+	if(Pipe->File)
+		fclose(Pipe->File);
+	if(RemoveTempFile)
+		remove(Pipe->FilePath);
+	Pipe->IsComplete=true;
+}
+
+//Open the file to pass through
+void OutPipe_Open(OutPipe* Pipe)
+{
+	if(Pipe->File=fopen(Pipe->FilePath, "rb")) //On success
+		_setmode(_fileno(Pipe->OutStream), _O_BINARY); //Set the output stream to binary (nulls are used)
+	else //On error
+		fprintf(stderr, "Could not open %s output file: %s\n", Pipe->PipeType, Pipe->FilePath);
 }

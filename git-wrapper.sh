@@ -2,17 +2,20 @@
 #Variables
 GIT_PATH=/usr/bin/git
 TMP_FILE=$(winepath -u 'c:\git.tmp') #This must match FileTempPath in git-launcher.c
-END_SEQ() { echo -ne '\0!\0!\0!\0!\0!' >> "$TMP_FILE"; } #This must match EndSeq in git-launcher.c (Cannot store in variable due to nulls)
+TMP_FILE_ERR=$(winepath -u 'c:\git.tmp.err') #This must match FileTempPathErr in git-launcher.c
+END_SEQ() { echo -ne '\0!\0!\0!\0!\0!'; } #This must match EndSeq in git-launcher.c (Cannot store in variable due to nulls)
 
 #Truncate the temp file if it already exists. Needs to happen immediately so executable doesn’t try to access the wrong file
 echo -n "" > "$TMP_FILE"
+echo -n "" > "$TMP_FILE_ERR"
 
 #Handle version request. Need to append .windows.1 to the end for TortoiseGit.
 if [[ "$1" == "version" || "$1" == "--version" ]]; then
     output=$("$GIT_PATH" "$@")
     exit_code=$?
-    printf '%s\n' "${output}.windows.1" >> "$TMP_FILE"
-    END_SEQ
+    printf '%s\n' "${output}.windows.1" >> "$TMP_FILE" 2>> "$TMP_FILE_ERR"
+    END_SEQ >> "$TMP_FILE"
+    END_SEQ >> "$TMP_FILE_ERR"
     exit $exit_code
 fi
 
@@ -33,7 +36,7 @@ if [[ ${new_args[0]} == "diff-index" ]]; then
 fi
 
 #Save the git command output to file
-"$GIT_PATH" "${new_args[@]}" >> "$TMP_FILE"
+"$GIT_PATH" "${new_args[@]}" >> "$TMP_FILE" 2>> "$TMP_FILE_ERR"
 exit_code=$?
 
 #Logging
@@ -41,9 +44,14 @@ if [[ -v TGIT_LOG ]]; then
     TGIT_LOG_PATH=/tmp/tgit-wrapper.log
     echo `date +"%Y-%m-%d %H:%M:%S:"` "${new_args[@]}" >> "$TGIT_LOG_PATH"
     cat "$TMP_FILE" >> "$TGIT_LOG_PATH"
-    echo -e "\n------------------------------------------" >> "$TGIT_LOG_PATH"
+    if [ -s "$TMP_FILE_ERR" ]; then
+        echo -e "\n---------------------ERR---------------------" >> "$TGIT_LOG_PATH"
+        cat "$TMP_FILE_ERR" >> "$TGIT_LOG_PATH"
+    fi
+    echo -e "\n---------------------------------------------" >> "$TGIT_LOG_PATH"
 fi
 
 #Send finishing data to our executable
-END_SEQ
+END_SEQ >> "$TMP_FILE"
+END_SEQ >> "$TMP_FILE_ERR"
 exit $exit_code
