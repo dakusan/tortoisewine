@@ -2,12 +2,13 @@
 
 #include <stdio.h>
 #include <malloc.h>
+#include <string.h>
 #include <time.h>
 #include <unistd.h> //usleep
 #include <fcntl.h> //_O_BINARY
 
 //Set this
-const char* GitPath="c:\\git-linux.exe"; //Do not try to escape this string
+const char* GitPath="c:\\git-wrapper.exe"; //Do not try to escape this string
 
 //No need to update these
 const char* FileTempPath="C:\\git.tmp";
