@@ -9,51 +9,8 @@ I recommend using [RabbitVCS](http://rabbitvcs.org/) to get status icons in your
 For now, I have everything just being put in `C:\` for simplicity.
 
 # Install
-> [!IMPORTANT]
-> Run these commands starting inside this repository’s root directory.<br>
-> **Always** make sure `WINEPREFIX` environment variable is set
-1. Create the wine sandbox
-	```
-	#Set session wine prefix folder
-	export WINEPREFIX=~/.wine-tortoise
-
-	#Run any wine command to create your new wine sandbox
-	wine dir
-
-	#Set the wine theme to None, as other themes have issues with the log window
-	wine reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\ThemeManager" /v ThemeActive /t REG_SZ /d "0" /f
-	```
-1. Symlink the project files
-	```
-	#Copy source code to C:\
-	ln -s "`realpath git-launcher.c`" "$WINEPREFIX/drive_c/"
-
-	#Copy the git wrapper to C:\
-	GIT_WRAPPER_SCRIPT="$(realpath git-wrapper.sh)"
-	ln -s "$GIT_WRAPPER_SCRIPT" "$WINEPREFIX/drive_c/git-wrapper.exe"
-	chmod 555 "$GIT_WRAPPER_SCRIPT" #Remove write permission so Windows cannot escape Wine jail
-	#sudo chown root:root "$GIT_WRAPPER_SCRIPT" #Optionally set owner as root to further harden above line
-
-	#Copy the tgit command to the bin folder
-	sudo bash -c 'cp tgit /usr/bin/ && chown root:root /usr/bin/tgit'
-	```
-1. Compile the `git.exe` executable
-	```
-	#Install compiler
-	sudo apt install mingw-w64
-
-	#Compile the file
-	cd "$WINEPREFIX/drive_c"
-	x86_64-w64-mingw32-gcc git-launcher.c -o git.exe -mconsole -s -Os -Wl,--gc-sections
-	```
-1. Prepare TortoiseGit
-	1. Install [TortoiseGit 2.17](https://download.tortoisegit.org/tgit/2.17.0.0/) (2.18 refuses to install)
-		1. Run on the downloaded file: `wine TortoiseGit-2.17.0.2-64bit.msi`
-		1. During install:
-			1. Choose SSH Client > OpenSSH
-			1. Git.exe Path: `C:`
-
-You should be good to go now to run TortoiseGit commands via `tgit`.
+- Run install.sh
+- You should be good to go now to run TortoiseGit commands via `tgit`.
 
 # Why this is needed
 The native Linux `git` executable has some issues with TortoiseGit.
