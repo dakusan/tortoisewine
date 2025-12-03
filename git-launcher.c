@@ -10,16 +10,41 @@
 #include <fcntl.h> //_O_BINARY
 
 //Set this
-const char *GitPath="c:\\git-wrapper.exe"; //Do not try to escape this string
+const char *GitPath="c:\\git-wrapper.exe"; //Do not escape this string for the shell
 
-//No need to update these
+//Numeric constants that define how parts of the program work
+const size_t StrBufGrowSize				=1024;
+const size_t ReadFileBufferSize			=4096;
+const long int NoFileActivityMSTimeout	=10*1000;
+const int MSTimeBetweenFileReads		=100;
+const int InitialGetFileData_NumAttempts=100;
+const int InitialGetFileData_MSInterval	=50;
+enum ErrorCodes
+{
+	EC_SUCCESS							=0  ,
+	EC_FAILED_READ_MAIN_OUT				=101,
+	EC_FAILED_READ_ERR_OUT				=102,
+	EC_TIMEOUT							=103,
+	EC_GOT_SIGNAL						=104,
+};
+
+//Generic constants
+enum
+{
+	CHAR_SIZE							=sizeof(char),
+	MILLI_SECONDS_TO_MICRO_SECONDS		=1000,
+	ZERO								=0,
+};
+const long int SECONDS_TO_MILLI_SECONDS	=1000L;
+const char NULL_TERM					='\0';
+
+//These must match the constants in git-wrapper.sh
 const char *FileTempPath="C:\\git.tmp", *FileTempPathErr="C:\\git.tmp.err";
-const char EndSeq[]={0, '!', 0, '!', 0, '!', 0, '!', 0, '!'}; //This sequence marks the end of the output
-const int GrowSize=1024;
+const char EndSeq[]={NULL_TERM, '!', NULL_TERM, '!', NULL_TERM, '!', NULL_TERM, '!', NULL_TERM, '!'}; //This sequence marks the end of the output
 enum { SeqSize=sizeof(EndSeq) }; //Using enum for compile time constant
 
 //Simple use functions
-void MilliSleep(int Milliseconds) { usleep(Milliseconds*1000); }
+void MilliSleep(int Milliseconds) { usleep(Milliseconds*MILLI_SECONDS_TO_MICRO_SECONDS); }
 int min(int A, int B) { return A < B ? A : B; }
 
 //Simple string handling
@@ -37,12 +62,12 @@ static void Grow(StrBuf *B, size_t Need)
 
 	//Grow to the appropriate size
 	while(B->Cap<Required)
-		B->Cap+=GrowSize;
+		B->Cap+=StrBufGrowSize;
 	B->Str=realloc(B->Str, B->Cap);
 }
 static void AddCh(StrBuf *B, char c) //Note: We aren’t worrying about the string terminator here
 {
-	Grow(B, 1);
+	Grow(B, CHAR_SIZE);
 	B->Str[B->Len++]=c;
 }
 static void AddStr(StrBuf *B, const char *Str)
@@ -52,8 +77,8 @@ static void AddStr(StrBuf *B, const char *Str)
 	memcpy(B->Str+B->Len, Str, StrLen);
 	B->Len+=StrLen;
 }
-#define CmdCh(Arg1) AddCh(&Command, Arg1)
-#define CmdStr(Arg1) AddStr(&Command, Arg1)
+#define CmdCh(AddArg) AddCh(&Command, AddArg)
+#define CmdStr(AddArg) AddStr(&Command, AddArg)
 
 //Handle reading a file to an output stream
 typedef struct
@@ -64,12 +89,12 @@ typedef struct
 	bool IsComplete;
 	char Check[SeqSize];
 } OutPipe;
-bool OutPipe_Process(OutPipe* Pipe);
-void OutPipe_Close(OutPipe* Pipe, bool DoNotRemove);
-void OutPipe_Open(OutPipe* Pipe);
+bool OutPipe_Process(OutPipe *Pipe);
+void OutPipe_Close(OutPipe *Pipe, bool DoNotRemove);
+void OutPipe_Open(OutPipe *Pipe);
 
 //Handle signals
-volatile sig_atomic_t CaughtSig=0;
+volatile sig_atomic_t CaughtSig=ZERO;
 void SignalHandler(int Sig) { signal(CaughtSig=Sig, SIG_DFL); } // Reset to default after handling
 int ReturnFromSigFunc()
 {
@@ -82,7 +107,7 @@ int ReturnFromSigFunc()
 		: CaughtSig==SIGTERM? "SIGTERM"
 		: "Unknown signal"
 	);
-	return 104;
+	return EC_GOT_SIGNAL;
 }
 #define ReturnFromSig() if(CaughtSig) return ReturnFromSigFunc()
 
@@ -96,13 +121,13 @@ int main(int argc, const char *argv[])
 #endif
 
 	//Create and execute the command string
-	StrBuf Command={0};
+	StrBuf Command={NULL, ZERO, ZERO};
 	CmdCh('"'); //Quote the entire string (windows is dumb)
-	argv[0]=GitPath;
-	for(int i=0; argv[i]; i++) //Add the quoted arguments
+	argv[ZERO]=GitPath;
+	for(int i=ZERO; argv[i]; i++) //Add the quoted arguments
 	{
 		const char EscapeQuote='"';
-		if(i!=0)
+		if(i)
 			CmdCh(' ');
 		CmdCh(EscapeQuote);
 		for(const char *P=argv[i]; *P; ++P) {
@@ -114,15 +139,15 @@ int main(int argc, const char *argv[])
 	}
 	CmdStr(" 2>&1 > NUL"); //Ignore all output, as real output is written to a file
 	CmdCh('"'); //End the entire string quote
-	CmdCh(0); //Terminate the string
+	CmdCh(NULL_TERM); //Terminate the string
 	ReturnFromSig();
 	int RetCode=system(Command.Str);
 	free(Command.Str);
 	ReturnFromSig();
 
 	//Prepare to read in the outputs
-	OutPipe MainOut={0, stdout, FileTempPath, "Standard", 0, false, {0}};
-	OutPipe ErrOut={0, stderr, FileTempPathErr, "Error", 0, false, {0}};
+	OutPipe MainOut={NULL, stdout, FileTempPath, "Standard", ZERO, false, {NULL_TERM}};
+	OutPipe ErrOut={NULL, stderr, FileTempPathErr, "Error", ZERO, false, {NULL_TERM}};
 	OutPipe_Open(&MainOut);
 	OutPipe_Open(&ErrOut);
 	if(CaughtSig || !MainOut.File || !ErrOut.File)
@@ -130,12 +155,12 @@ int main(int argc, const char *argv[])
 		OutPipe_Close(&MainOut, false);
 		OutPipe_Close(&ErrOut, false);
 		ReturnFromSig();
-		return !MainOut.File ? 101 : 102;
+		return !MainOut.File ? EC_FAILED_READ_MAIN_OUT : EC_FAILED_READ_ERR_OUT;
 	}
 
 	//Process both stdout and stderr pipes
 	clock_t LastUpdate=clock();
-	while(1) {
+	while(true) {
 		//If both are done, then complete the process
 		if(MainOut.IsComplete && ErrOut.IsComplete)
 			break;
@@ -151,15 +176,15 @@ int main(int argc, const char *argv[])
 			continue;
 		}
 
-		//Exit if more than 10 seconds has passed since the last update
-		if((clock()-LastUpdate)*1000L/CLOCKS_PER_SEC>10*1000) {
-			fprintf(stderr, "%s\n", "Process has timed out (10 seconds)");
-			RetCode=RetCode ?: 103;
+		//Exit if more than $NoFileActivityMSTimeout milliseconds has passed since the last update
+		if((clock()-LastUpdate)*SECONDS_TO_MILLI_SECONDS/CLOCKS_PER_SEC>NoFileActivityMSTimeout) {
+			fprintf(stderr, "Process has timed out (%f seconds)\n", (float)NoFileActivityMSTimeout/(float)SECONDS_TO_MILLI_SECONDS);
+			RetCode=RetCode ?: EC_TIMEOUT;
 			break;
 		}
 
-		//Sleep for 100 ms before trying to read the pipes again
-		MilliSleep(100);
+		//Sleep for $MSTimeBetweenFileReads ms before trying to read the pipes again
+		MilliSleep(MSTimeBetweenFileReads);
 	}
 
 	//Clean up and close out
@@ -169,31 +194,28 @@ int main(int argc, const char *argv[])
 	return RetCode;
 }
 
-//Read in and output up to ChunkCapacity bytes at a time from OutPipe (stdout and stderr). When the end of the read bytes equals the end sequence then we are done with the stream (do not output the end sequence)
-bool OutPipe_Process(OutPipe* Pipe)
+//Read in and output up to $ReadFileBufferSize bytes at a time from OutPipe (stdout and stderr). When the end of the read bytes equals the end sequence then we are done with the stream (do not output the end sequence)
+bool OutPipe_Process(OutPipe *Pipe)
 {
 	//If already complete, nothing to do
 	if(Pipe->IsComplete)
 		return false;
 
-	//Buffers
-	const size_t ChunkCapacity=4096;
-	char Chunk[ChunkCapacity];
-
 	//Read in bytes. Return false if nothing read.
+	char Chunk[ReadFileBufferSize]; //Buffer
 	int Bytes;
-	if(!(Bytes=fread(Chunk, 1, ChunkCapacity, Pipe->File)))
+	if(!(Bytes=fread(Chunk, CHAR_SIZE, ReadFileBufferSize, Pipe->File)))
 		return false;
 
 	//Write the current chunk
 	int ChunkBytesToMoveToCheck=min(Bytes, SeqSize);
-	fwrite(Chunk, 1, Bytes-ChunkBytesToMoveToCheck, Pipe->OutStream);
+	fwrite(Chunk, CHAR_SIZE, Bytes-ChunkBytesToMoveToCheck, Pipe->OutStream);
 	fflush(Pipe->OutStream);
 
 	//Shift Check bytes out to make room for bytes from Chunk. As bytes are shifted out, write them to stdout
 	int ShiftCheckBytes=ChunkBytesToMoveToCheck-(SeqSize-Pipe->CheckSize);
-	if(ShiftCheckBytes>0) {
-		fwrite(Pipe->Check, 1, ShiftCheckBytes, Pipe->OutStream);
+	if(ShiftCheckBytes>ZERO) {
+		fwrite(Pipe->Check, CHAR_SIZE, ShiftCheckBytes, Pipe->OutStream);
 		memmove(Pipe->Check, Pipe->Check+ShiftCheckBytes, Pipe->CheckSize-=ShiftCheckBytes);
 	}
 
@@ -206,18 +228,18 @@ bool OutPipe_Process(OutPipe* Pipe)
 		return true;
 
 	//Finish out the pipe
-	Pipe->CheckSize=0;
+	Pipe->CheckSize=ZERO;
 	OutPipe_Close(Pipe, true);
 	return true;
 }
 
 //Clean up and close out the pipe
-void OutPipe_Close(OutPipe* Pipe, bool RemoveTempFile)
+void OutPipe_Close(OutPipe *Pipe, bool RemoveTempFile)
 {
 	if(Pipe->IsComplete)
 		return;
 	if(Pipe->CheckSize) //Output the remainder of the check buffer
-		fwrite(Pipe->Check, 1, Pipe->CheckSize, Pipe->OutStream);
+		fwrite(Pipe->Check, CHAR_SIZE, Pipe->CheckSize, Pipe->OutStream);
 	fflush(Pipe->OutStream);
 	if(Pipe->File)
 		fclose(Pipe->File);
@@ -227,18 +249,19 @@ void OutPipe_Close(OutPipe* Pipe, bool RemoveTempFile)
 }
 
 //Open the file to pass through
-void OutPipe_Open(OutPipe* Pipe)
+void OutPipe_Open(OutPipe *Pipe)
 {
 	//Keep attempting to open the file until it has data
 	FILE *TestOpen=NULL;
-	for(int Attempts=0; Attempts<100; Attempts++) {
-		MilliSleep(50);
-		if(CaughtSig) return;
+	for(int Attempts=ZERO; Attempts<InitialGetFileData_NumAttempts; Attempts++) {
+		MilliSleep(InitialGetFileData_MSInterval);
+		if(CaughtSig)
+			return;
 		if(!(TestOpen=fopen(Pipe->FilePath, "rb")))
 			continue;
-		fseek(TestOpen, 0, SEEK_END);
-		if(ftell(TestOpen)>0) {
-			fseek(TestOpen, 0, SEEK_SET);
+		fseek(TestOpen, ZERO, SEEK_END);
+		if(ftell(TestOpen)>ZERO) {
+			fseek(TestOpen, ZERO, SEEK_SET);
 			break;
 		}
 		fclose(TestOpen);
