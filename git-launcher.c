@@ -26,11 +26,13 @@ enum ErrorCodes
 	EC_FAILED_READ_ERR_OUT				=102,
 	EC_TIMEOUT							=103,
 	EC_GOT_SIGNAL						=104,
+	EC_READ_EXIT_CODE_FAIL				=105,
 };
 
 //Generic constants
 enum
 {
+	MAX_CHARS_IN_ERROR_CODE				=3,
 	CHAR_SIZE							=sizeof(char),
 	MILLI_SECONDS_TO_MICRO_SECONDS		=1000,
 	ZERO								=0,
@@ -39,7 +41,7 @@ const long int SECONDS_TO_MILLI_SECONDS	=1000L;
 const char NULL_TERM					='\0';
 
 //These must match the constants in git-wrapper.sh
-const char *FileTempPath="C:\\git.tmp", *FileTempPathErr="C:\\git.tmp.err";
+const char *FileTempPath="C:\\git.tmp", *FileTempPathErr="C:\\git.tmp.err", *FileTempPathExitCode="C:\\git.tmp.exit";
 const char EndSeq[]={NULL_TERM, '!', NULL_TERM, '!', NULL_TERM, '!', NULL_TERM, '!', NULL_TERM, '!'}; //This sequence marks the end of the output
 enum { SeqSize=sizeof(EndSeq) }; //Using enum for compile time constant
 
@@ -178,7 +180,7 @@ int main(int argc, const char *argv[])
 
 		//Exit if more than $NoFileActivityMSTimeout milliseconds has passed since the last update
 		if((clock()-LastUpdate)*SECONDS_TO_MILLI_SECONDS/CLOCKS_PER_SEC>NoFileActivityMSTimeout) {
-			fprintf(stderr, "Process has timed out (%f seconds)\n", (float)NoFileActivityMSTimeout/(float)SECONDS_TO_MILLI_SECONDS);
+			fprintf(stderr, "Process has timed out (%.3f+ seconds)\n", (float)NoFileActivityMSTimeout/(float)SECONDS_TO_MILLI_SECONDS);
 			RetCode=RetCode ?: EC_TIMEOUT;
 			break;
 		}
@@ -191,7 +193,23 @@ int main(int argc, const char *argv[])
 	OutPipe_Close(&MainOut, !CaughtSig);
 	OutPipe_Close(&ErrOut, !CaughtSig);
 	ReturnFromSig();
-	return RetCode;
+	if(RetCode!=EC_SUCCESS)
+		return RetCode;
+
+	//Get the real return code
+	char ExitCodeBuff[MAX_CHARS_IN_ERROR_CODE+CHAR_SIZE]={NULL_TERM};
+	FILE *FileExitCode=fopen(FileTempPathExitCode, "r");
+	if(!FileExitCode)
+		return EC_READ_EXIT_CODE_FAIL;
+	int AmountRead=fread(ExitCodeBuff, CHAR_SIZE, MAX_CHARS_IN_ERROR_CODE, FileExitCode);
+	fclose(FileExitCode);
+	remove(FileTempPathExitCode);
+	if(!AmountRead)
+		return EC_READ_EXIT_CODE_FAIL;
+	for(int i=ZERO; i<AmountRead; i++)
+		if(ExitCodeBuff[i]<'0' || ExitCodeBuff[i]>'9')
+			return EC_READ_EXIT_CODE_FAIL;
+	return atoi(ExitCodeBuff); //Allows error codes up to 999
 }
 
 //Read in and output up to $ReadFileBufferSize bytes at a time from OutPipe (stdout and stderr). When the end of the read bytes equals the end sequence then we are done with the stream (do not output the end sequence)
