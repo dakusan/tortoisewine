@@ -10,7 +10,7 @@ Run Git repo commands with <code>tgit <**COMMAND_NAME**> <**PATH**></code>.
 ## Installation
 
 1. Run `./install.sh`.
-1. Install TortoiseGit from [tortoisegit.org](https://tortoisegit.org/download/) ([v2.17.0.0](https://download.tortoisegit.org/tgit/2.17.0.0/) recommended; 2.18+ will fail to install).
+1. Install TortoiseGit from [tortoisegit.org](https://tortoisegit.org/download/) ([v2.17.0.0](https://download.tortoisegit.org/tgit/2.17.0.0/) recommended; 2.18+ will fail to install — Let me know if you find a way around the Windows version check).
 1. In TortoiseGit setup, set **Git.exe Path** to `C:\`.
 
 ## RabbitVCS Integration
@@ -19,6 +19,9 @@ Run Git repo commands with <code>tgit <**COMMAND_NAME**> <**PATH**></code>.
    - `diff`, `commit`, `log`, `push`, `update` → `fetch`
    - Adding/extending commands is straightforward; testers welcome for validation and patches.
 - Note: Extension logic is experimental; refinements very likely needed.
+
+## Debugging
+Add `export TGIT_LOG=1` to `tgit` (below shebang) and/or `.bashrc` to log to `/tmp/tgit-command.log` and `/tmp/tgit-wrapper.log`.
 
 ## TODO
 - Add **Nautilus** support (*simple to do*; **Nemo**-only for now; testers needed).

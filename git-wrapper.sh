@@ -8,6 +8,9 @@ GIT_PATH=/usr/bin/git
 TMP_FILE_EXIT_CODE=$(winepath -u 'c:\git.tmp.exit') #This must match FileTempPathExitCode
           END_SEQ() { echo -ne '\0!\0!\0!\0!\0!'; } #This must match EndSeq (Cannot store in variable due to nulls)
 
+#Fix environment variables from TortoiseGit
+unset GIT_SSH
+
 #Truncate the temp file if it already exists. Needs to happen immediately so executable doesn’t try to access the wrong file
 > "$TMP_FILE"
 > "$TMP_FILE_ERR"
