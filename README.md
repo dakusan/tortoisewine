@@ -5,7 +5,10 @@ This project enables **TortoiseGit** on **Linux** using **Wine**, integrated wit
 Run Git repo commands with <code>tgit <**COMMAND_NAME**> <**PATH**></code>.
 
 > [!IMPORTANT]
-> Always set `WINEPREFIX=~/.wine-tortoise` for Wine commands (e.g., `export WINEPREFIX=~/.wine-tortoise`). `tgit` handles this automatically.
+> Always make sure your `WINEPREFIX` is correctly set before running commands (e.g., `export WINEPREFIX=~/.wine-tortoise`). The installer and `tgit` command use `WINEPREFIX=~/.wine-tortoise` by default.
+
+> [!NOTE]
+> The installer will turn off themes for your `WINEPREFIX` install.
 
 ## Installation
 
