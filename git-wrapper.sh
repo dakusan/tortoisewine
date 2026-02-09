@@ -29,12 +29,15 @@ fi
 
 #Change windows to linux paths
 new_args=()
+PSec="--pathspec-from-file"
 for arg in "$@"; do
 	converted=$(winepath -u "$arg")
 	if [[ $arg =~ ^[a-zA-Z]:\\ ]]; then
 		new_args+=("$converted")
 	elif [[ $arg == *\\* ]] && [[ -n "$converted" ]] && [[ -f "$converted" ]]; then
 		new_args+=("$converted")
+	elif [[ $arg == $PSec=* ]]; then
+		new_args+=("$PSec=$(winepath -u "${arg#$PSec=}")")
 	else
 		new_args+=("$arg")
 	fi
